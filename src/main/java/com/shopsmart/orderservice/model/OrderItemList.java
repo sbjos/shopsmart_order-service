@@ -14,7 +14,7 @@ import java.math.BigDecimal;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class ItemList {
+public class OrderItemList {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

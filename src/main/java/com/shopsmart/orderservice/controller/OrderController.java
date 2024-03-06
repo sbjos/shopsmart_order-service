@@ -1,10 +1,13 @@
 package com.shopsmart.orderservice.controller;
 
 import com.shopsmart.orderservice.dto.OrderRequest;
+import com.shopsmart.orderservice.dto.OrderResponse;
 import com.shopsmart.orderservice.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping(value = "api/order")
@@ -15,9 +18,25 @@ public class OrderController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public String placeOrder(@RequestBody OrderRequest orderRequest) {
+    public void placeOrder(@RequestBody OrderRequest orderRequest) {
         orderService.placeOrder(orderRequest);
-        
-        return "Order placed successfully!";
+    }
+
+    @GetMapping
+    @ResponseStatus(HttpStatus.OK)
+    public List<OrderResponse> getAllOrder() {
+        return orderService.getAllOrder();
+    }
+
+    @GetMapping(value = "/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    public OrderResponse getOrder(@PathVariable Long id) {
+        return orderService.getOrder(id);
+    }
+
+    @DeleteMapping(value = "/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    public void cancelOrder(@PathVariable Long id) {
+        orderService.cancelOrder(id);
     }
 }

@@ -1,20 +1,25 @@
 package com.shopsmart.orderservice.service;
 
-import com.shopsmart.orderservice.dto.ItemListDto;
+import com.shopsmart.orderservice.dto.OrderItemListDto;
 import com.shopsmart.orderservice.dto.OrderRequest;
-import com.shopsmart.orderservice.model.ItemList;
+import com.shopsmart.orderservice.dto.OrderResponse;
+import com.shopsmart.orderservice.exception.OrderNotFoundException;
+import com.shopsmart.orderservice.model.OrderItemList;
 import com.shopsmart.orderservice.model.Order;
 import com.shopsmart.orderservice.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
+@Transactional
 public class OrderService {
 
     private final OrderRepository orderRepository;
@@ -23,21 +28,59 @@ public class OrderService {
         Order order = new Order();
 
         order.setOrderNumber(UUID.randomUUID().toString());
-        order.setItemList(orderRequest.getItemListDto().stream()
-                .map(this::mapToDto)
-                .collect(Collectors.toList())
+        order.setOrderItemList(orderRequest.getOrderItemListDto().stream()
+                .map(this::mapFromDto)
+                .toList()
         );
 
         orderRepository.save(order);
+
+        log.info("{} is saved", order.getOrderNumber());
     }
 
-    private ItemList mapToDto(ItemListDto itemListDto) {
-        ItemList itemList = new ItemList();
+    public List<OrderResponse> getAllOrder() {
+        List<Order> orderList = orderRepository.findAll();
 
-        itemList.setQuantity(itemListDto.getQuantity());
-        itemList.setPrice(itemListDto.getPrice());
-        itemList.setSkuCode(itemListDto.getSkuCode());
+        if (!orderList.isEmpty()) {
+            return orderList.stream()
+                    .map(this::mapToOrderResponse)
+                    .toList();
+        } else {
+            throw new OrderNotFoundException("Product list not found");
+        }
+    }
 
-        return itemList;
+    public OrderResponse getOrder(Long id) {
+        return mapToOrderResponse(findOrder(id));
+    }
+
+    public void cancelOrder(Long id) {
+        Order order = findOrder(id);
+        orderRepository.delete(order);
+    }
+
+    private Order findOrder(Long id) {
+        return orderRepository.findById(id)
+                .orElseThrow(() ->
+                        new OrderNotFoundException(String.format("Order %s not found", id))
+                );
+    }
+
+    private OrderItemList mapFromDto(OrderItemListDto orderItemListDto) {
+        OrderItemList orderItemList = new OrderItemList();
+
+        orderItemList.setQuantity(orderItemListDto.getQuantity());
+        orderItemList.setPrice(orderItemListDto.getPrice());
+        orderItemList.setSkuCode(orderItemListDto.getSkuCode());
+
+        return orderItemList;
+    }
+
+    private OrderResponse mapToOrderResponse(Order order) {
+        return OrderResponse.builder()
+                .id(order.getId())
+                .orderNumber(order.getOrderNumber())
+                .orderItemList(order.getOrderItemList())
+                .build();
     }
 }

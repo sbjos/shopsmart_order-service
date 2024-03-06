@@ -2,7 +2,6 @@ package com.shopsmart.orderservice.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.springframework.data.annotation.Persistent;
 
 import java.util.List;
 
@@ -19,5 +18,5 @@ public class Order {
     private String orderNumber;
 
     @OneToMany(cascade = CascadeType.ALL)
-    private List<ItemList> itemList;
+    private List<OrderItemList> orderItemList;
 }
