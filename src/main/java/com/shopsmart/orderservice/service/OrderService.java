@@ -1,5 +1,6 @@
 package com.shopsmart.orderservice.service;
 
+import com.shopsmart.orderservice.config.WebConfig;
 import com.shopsmart.orderservice.dto.OrderItemListDto;
 import com.shopsmart.orderservice.dto.OrderRequest;
 import com.shopsmart.orderservice.dto.OrderResponse;
@@ -11,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +24,8 @@ import java.util.UUID;
 @Transactional
 public class OrderService {
 
+    private final WebClient webClient;
+
     private final OrderRepository orderRepository;
 
     public void placeOrder(OrderRequest orderRequest) {
@@ -32,6 +36,13 @@ public class OrderService {
                 .map(this::mapFromDto)
                 .toList()
         );
+
+        // Calling inventory-service to verify if the product is in stock before creating the order.
+        boolean productInStock = webClient.get()
+                .uri("http://localhost:8082/api/inventory")
+                .retrieve()
+                .bodyToMono(Boolean.class)
+                .block(); // Will do a synchronous request. If not, it will perform an asynchronous request.
 
         orderRepository.save(order);
 
