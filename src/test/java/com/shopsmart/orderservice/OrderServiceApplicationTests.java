@@ -24,18 +24,12 @@ import java.util.List;
 
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * Integration Test
- */
+// Integration Test
+// Run inventory-service for successful test
 @SpringBootTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @AutoConfigureMockMvc
 class OrderServiceApplicationTests {
-
-//	@Test
-//	void contextLoads() {
-//	}
-
 	@Autowired
 	private MockMvc mockMvc;
 	@Autowired
