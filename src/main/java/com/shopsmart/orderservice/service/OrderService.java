@@ -1,10 +1,11 @@
 package com.shopsmart.orderservice.service;
 
-import com.shopsmart.orderservice.config.WebConfig;
+import com.shopsmart.orderservice.dto.InventoryResponse;
 import com.shopsmart.orderservice.dto.OrderItemListDto;
 import com.shopsmart.orderservice.dto.OrderRequest;
 import com.shopsmart.orderservice.dto.OrderResponse;
 import com.shopsmart.orderservice.exception.OrderNotFoundException;
+import com.shopsmart.orderservice.exception.OutOfStockException;
 import com.shopsmart.orderservice.model.OrderItemList;
 import com.shopsmart.orderservice.model.Order;
 import com.shopsmart.orderservice.repository.OrderRepository;
@@ -14,9 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -30,23 +30,43 @@ public class OrderService {
 
     public void placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
-
         order.setOrderNumber(UUID.randomUUID().toString());
         order.setOrderItemList(orderRequest.getOrderItemListDto().stream()
                 .map(this::mapFromDto)
-                .toList()
+                .collect(Collectors.toList())
         );
 
+        Map<String, Integer> orderSkuStocktMap = new HashMap<>();
+
+        for (OrderItemList orderItems : order.getOrderItemList()) {
+            orderSkuStocktMap.put(orderItems.getSkuCode(), orderItems.getQuantity());
+        }
+
         // Calling inventory-service to verify if the product is in stock before creating the order.
-        boolean productInStock = webClient.get()
-                .uri("http://localhost:8082/api/inventory")
+        InventoryResponse[] inventoryList = webClient.get()
+                .uri("http://localhost:8082/api/inventory",
+                        uriBuilder -> uriBuilder.queryParam("skuCode",orderSkuStocktMap.keySet()).build())
                 .retrieve()
-                .bodyToMono(Boolean.class)
+                .bodyToMono(InventoryResponse[].class)
                 .block(); // Will do a synchronous request. If not, it will perform an asynchronous request.
 
-        orderRepository.save(order);
+        // Verifying if they are all available.
+        boolean isProductInStock = Arrays.stream(inventoryList)
+                .allMatch(inventory -> inventory.getInStock() >= orderSkuStocktMap.get(inventory.getSkuCode()));
 
-        log.info("{} is saved", order.getOrderNumber());
+//        for (InventoryResponse response : inventoryList) {
+//            isProductInStock = orderSkuStocktMap.get(response.getSkuCode()) >= response.getInStock();
+//        }
+
+        // If all available, order is saved.
+        if (isProductInStock) {
+            orderRepository.save(order);
+
+            log.info("{} is saved", order.getOrderNumber());
+        } else {
+            // If not all available, order will not be saved.
+            throw new OutOfStockException("Product out of stock");
+        }
     }
 
     public List<OrderResponse> getAllOrder() {
