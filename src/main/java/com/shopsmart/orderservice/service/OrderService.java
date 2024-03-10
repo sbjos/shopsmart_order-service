@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 @Transactional
 public class OrderService {
 
-    private final WebClient webClient;
+    private final WebClient.Builder webclientBuilder;
 
     private final OrderRepository orderRepository;
 
@@ -43,7 +43,7 @@ public class OrderService {
         }
 
         // Calling inventory-service to verify if the product is in stock before creating the order.
-        InventoryResponse[] inventoryList = webClient.get()
+        InventoryResponse[] inventoryList = webclientBuilder.build().get()
                 .uri("http://localhost:8082/api/inventory",
                         uriBuilder -> uriBuilder.queryParam("skuCode",orderSkuStocktMap.keySet()).build())
                 .retrieve()
