@@ -36,33 +36,29 @@ public class OrderService {
                 .collect(Collectors.toList())
         );
 
-        Map<String, Integer> orderSkuStocktMap = new HashMap<>();
+        Map<String, Integer> orderSkuStockMap = new HashMap<>();
 
         for (OrderItemList orderItems : order.getOrderItemList()) {
-            orderSkuStocktMap.put(orderItems.getSkuCode(), orderItems.getQuantity());
+            orderSkuStockMap.put(orderItems.getSkuCode(), orderItems.getQuantity());
         }
 
         // Calling inventory-service to verify if the product is in stock before creating the order.
         InventoryResponse[] inventoryList = webclientBuilder.build().get()
-                .uri("http://localhost:8082/api/inventory",
-                        uriBuilder -> uriBuilder.queryParam("skuCode",orderSkuStocktMap.keySet()).build())
+                .uri("http://inventory-service/api/inventory",
+                        uriBuilder -> uriBuilder.queryParam("skuCode",orderSkuStockMap.keySet()).build())
                 .retrieve()
                 .bodyToMono(InventoryResponse[].class)
                 .block(); // Will do a synchronous request. If not, it will perform an asynchronous request.
 
         // Verifying if they are all available.
         boolean isProductInStock = Arrays.stream(inventoryList)
-                .allMatch(inventory -> inventory.getInStock() >= orderSkuStocktMap.get(inventory.getSkuCode()));
-
-//        for (InventoryResponse response : inventoryList) {
-//            isProductInStock = orderSkuStocktMap.get(response.getSkuCode()) >= response.getInStock();
-//        }
+                .allMatch(inventory -> inventory.getInStock() >= orderSkuStockMap.get(inventory.getSkuCode()));
 
         // If all available, order is saved.
         if (isProductInStock) {
             orderRepository.save(order);
 
-            log.info("{} is saved", order.getOrderNumber());
+            log.info("New order with order number {} is created", order.getOrderNumber());
         } else {
             // If not all available, order will not be saved.
             throw new OutOfStockException("Product out of stock");
