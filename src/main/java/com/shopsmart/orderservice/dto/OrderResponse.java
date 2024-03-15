@@ -16,4 +16,5 @@ public class OrderResponse {
     private Long id;
     private String orderNumber;
     private List<OrderItemList> orderItemList;
+    private List<InventoryResponse> outOfStock;
 }

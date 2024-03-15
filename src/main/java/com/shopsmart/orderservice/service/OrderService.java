@@ -9,6 +9,9 @@ import com.shopsmart.orderservice.exception.OutOfStockException;
 import com.shopsmart.orderservice.model.OrderItemList;
 import com.shopsmart.orderservice.model.Order;
 import com.shopsmart.orderservice.repository.OrderRepository;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
+import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -28,7 +32,10 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
 
-    public void placeOrder(OrderRequest orderRequest) {
+    @CircuitBreaker(name = "inventory", fallbackMethod = "fallbackMethod")
+    @TimeLimiter(name = "inventory")
+    @Retry(name = "inventory")
+    public CompletableFuture<OrderResponse> placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
         order.setOrderNumber(UUID.randomUUID().toString());
         order.setOrderItemList(orderRequest.getOrderItemListDto().stream()
@@ -43,53 +50,79 @@ public class OrderService {
         }
 
         // Calling inventory-service to verify if the product is in stock before creating the order.
-        InventoryResponse[] inventoryList = webclientBuilder.build().get()
-                .uri("http://inventory-service/api/inventory",
-                        uriBuilder -> uriBuilder.queryParam("skuCode",orderSkuStockMap.keySet()).build())
-                .retrieve()
-                .bodyToMono(InventoryResponse[].class)
-                .block(); // Will do a synchronous request. If not, it will perform an asynchronous request.
+        InventoryResponse[] inventoryList = inventoryList(orderSkuStockMap);
 
         // Verifying if they are all available.
         boolean isProductInStock = Arrays.stream(inventoryList)
-                .allMatch(inventory -> inventory.getInStock() >= orderSkuStockMap.get(inventory.getSkuCode()));
+                .allMatch(inventory ->
+                        inventory.getInStock() >= orderSkuStockMap.get(
+                                inventory.getSkuCode()
+                        )
+                );
 
         // If all available, order is saved.
         if (isProductInStock) {
             orderRepository.save(order);
-
-            log.info("New order with order number {} is created", order.getOrderNumber());
+            log.info("Order created");
+            return CompletableFuture.supplyAsync(() -> mapToOrderResponse(order));
         } else {
             // If not all available, order will not be saved.
-            throw new OutOfStockException("Product out of stock");
+            log.info("Some items are out of stock.", new OutOfStockException("Out of stock"));
+            return CompletableFuture.supplyAsync(() ->
+                    outOfStockItems(List.of(inventoryList), orderSkuStockMap));
         }
     }
 
     public List<OrderResponse> getAllOrder() {
+        log.info("Fetching order list");
         List<Order> orderList = orderRepository.findAll();
 
         if (!orderList.isEmpty()) {
+            log.info("Order list found");
             return orderList.stream()
                     .map(this::mapToOrderResponse)
                     .toList();
+
         } else {
-            throw new OrderNotFoundException("Product list not found");
+            log.info("Order list not found", new OrderNotFoundException("Order list not found"));
         }
+        return List.of();
     }
 
-    public OrderResponse getOrder(Long id) {
-        return mapToOrderResponse(findOrder(id));
+    public OrderResponse getOrder(String orderNumber) {
+        OrderResponse response = new OrderResponse();
+
+        try {
+            response = mapToOrderResponse(findOrder(orderNumber));
+            log.info("Order {} found", orderNumber);
+
+        } catch (OrderNotFoundException e) {
+            log.info("Order {} not found", orderNumber, e);
+        }
+        return response;
     }
 
-    public void cancelOrder(Long id) {
-        Order order = findOrder(id);
-        orderRepository.delete(order);
+    public OrderResponse cancelOrder(String orderNumber) {
+        OrderResponse response = new OrderResponse();
+
+        try {
+            Order order = findOrder(orderNumber);
+            log.info("Order {} found", orderNumber);
+            orderRepository.delete(order);
+            log.info("Order {} deleted", orderNumber);
+            response = mapToOrderResponse(order);
+
+        } catch (OrderNotFoundException e) {
+            log.info("Order {} not found", orderNumber, e);
+        }
+        return response;
     }
 
-    private Order findOrder(Long id) {
-        return orderRepository.findById(id)
+    private Order findOrder(String orderNumber) {
+        log.info("Fetching order {}", orderNumber);
+        return orderRepository.findByOrderNumber(orderNumber)
                 .orElseThrow(() ->
-                        new OrderNotFoundException(String.format("Order %s not found", id))
+                        new OrderNotFoundException(String.format("Order %s not found", orderNumber))
                 );
     }
 
@@ -109,5 +142,34 @@ public class OrderService {
                 .orderNumber(order.getOrderNumber())
                 .orderItemList(order.getOrderItemList())
                 .build();
+    }
+
+    // Adds out of stock items to a list
+    private OrderResponse outOfStockItems(List<InventoryResponse> inventory, Map<String, Integer> request) {
+        List<InventoryResponse> outOfStockItems = new ArrayList<>();
+
+        for (InventoryResponse response : inventory) {
+            if (response.getInStock() < request.get(response.getSkuCode())) {
+                outOfStockItems.add(response);
+            }
+        }
+        return OrderResponse.builder().outOfStock(outOfStockItems).build();
+    }
+
+    // Finds available stocks in inventory-service
+    private InventoryResponse[] inventoryList(Map<String, Integer> orderSkuStockMap) {
+        return webclientBuilder.build().get()
+                .uri("http://inventory-service/api/inventory",
+                        uriBuilder -> uriBuilder.queryParam("skuCode",
+                                orderSkuStockMap.keySet()).build())
+                .retrieve()
+                .bodyToMono(InventoryResponse[].class)
+                .block(); // Will do a synchronous request. If not, it will perform an asynchronous request.
+    }
+
+    // Fallback method for connection issues with inventory-service
+    private CompletableFuture<OrderResponse> fallbackMethod(OrderRequest orderRequest, RuntimeException RuntimeException) {
+        log.info("Investigate inventory-service integrity");
+        throw new RuntimeException("Something went wrong");
     }
 }
