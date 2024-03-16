@@ -1,5 +1,7 @@
 package com.shopsmart.orderservice.service;
 
+import brave.Span;
+import brave.Tracer;
 import com.shopsmart.orderservice.dto.InventoryResponse;
 import com.shopsmart.orderservice.dto.OrderItemListDto;
 import com.shopsmart.orderservice.dto.OrderRequest;
@@ -12,6 +14,8 @@ import com.shopsmart.orderservice.repository.OrderRepository;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,8 +33,8 @@ import java.util.stream.Collectors;
 public class OrderService {
 
     private final WebClient.Builder webclientBuilder;
-
     private final OrderRepository orderRepository;
+    private final ObservationRegistry observationRegistry;
 
     @CircuitBreaker(name = "inventory", fallbackMethod = "fallbackMethod")
     @TimeLimiter(name = "inventory")
@@ -50,27 +54,35 @@ public class OrderService {
         }
 
         // Calling inventory-service to verify if the product is in stock before creating the order.
-        InventoryResponse[] inventoryList = inventoryList(orderSkuStockMap);
+        log.info("Calling inventory-service");
 
-        // Verifying if they are all available.
-        boolean isProductInStock = Arrays.stream(inventoryList)
-                .allMatch(inventory ->
-                        inventory.getInStock() >= orderSkuStockMap.get(
-                                inventory.getSkuCode()
-                        )
-                );
+        Observation inventoryServiceObservation = Observation.createNotStarted("inventory-service-lookup",
+                this.observationRegistry);
 
-        // If all available, order is saved.
-        if (isProductInStock) {
-            orderRepository.save(order);
-            log.info("Order created");
-            return CompletableFuture.supplyAsync(() -> mapToOrderResponse(order));
-        } else {
-            // If not all available, order will not be saved.
-            log.info("Some items are out of stock.", new OutOfStockException("Out of stock"));
-            return CompletableFuture.supplyAsync(() ->
-                    outOfStockItems(List.of(inventoryList), orderSkuStockMap));
-        }
+        inventoryServiceObservation.lowCardinalityKeyValue("call", "inventory-service");
+        return inventoryServiceObservation.observe(() -> {
+            InventoryResponse[] inventoryList = inventoryList(orderSkuStockMap);
+
+            // Verifying if they are all available.
+            boolean isProductInStock = Arrays.stream(inventoryList)
+                    .allMatch(inventory ->
+                            inventory.getInStock() >= orderSkuStockMap.get(
+                                    inventory.getSkuCode()
+                            )
+                    );
+
+            // If all available, order is saved.
+            if (isProductInStock) {
+                orderRepository.save(order);
+                log.info("Order created");
+                return CompletableFuture.supplyAsync(() -> mapToOrderResponse(order));
+            } else {
+                // If not all available, order will not be saved.
+                log.info("Some items are out of stock.", new OutOfStockException("Out of stock"));
+                return CompletableFuture.supplyAsync(() ->
+                        outOfStockItems(List.of(inventoryList), orderSkuStockMap));
+            }
+        });
     }
 
     public List<OrderResponse> getAllOrder() {
