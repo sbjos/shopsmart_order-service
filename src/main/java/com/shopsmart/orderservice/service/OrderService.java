@@ -6,6 +6,7 @@ import com.shopsmart.orderservice.dto.InventoryResponse;
 import com.shopsmart.orderservice.dto.OrderItemListDto;
 import com.shopsmart.orderservice.dto.OrderRequest;
 import com.shopsmart.orderservice.dto.OrderResponse;
+import com.shopsmart.orderservice.event.OrderPlacedEvent;
 import com.shopsmart.orderservice.exception.OrderNotFoundException;
 import com.shopsmart.orderservice.exception.OutOfStockException;
 import com.shopsmart.orderservice.model.OrderItemList;
@@ -18,6 +19,7 @@ import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -35,6 +37,7 @@ public class OrderService {
     private final WebClient.Builder webclientBuilder;
     private final OrderRepository orderRepository;
     private final ObservationRegistry observationRegistry;
+    private final KafkaTemplate<String, OrderPlacedEvent> kafkaTemplate;
 
     @CircuitBreaker(name = "inventory", fallbackMethod = "fallbackMethod")
     @TimeLimiter(name = "inventory")
@@ -75,6 +78,10 @@ public class OrderService {
             if (isProductInStock) {
                 orderRepository.save(order);
                 log.info("Order created");
+
+                kafkaTemplate.send("notification-topic", mapToOrderPlacedEvent(order));
+                log.info("Notification sent");
+
                 return CompletableFuture.supplyAsync(() -> mapToOrderResponse(order));
             } else {
                 // If not all available, order will not be saved.
@@ -150,6 +157,14 @@ public class OrderService {
 
     private OrderResponse mapToOrderResponse(Order order) {
         return OrderResponse.builder()
+                .id(order.getId())
+                .orderNumber(order.getOrderNumber())
+                .orderItemList(order.getOrderItemList())
+                .build();
+    }
+
+    private OrderPlacedEvent mapToOrderPlacedEvent(Order order) {
+        return OrderPlacedEvent.builder()
                 .id(order.getId())
                 .orderNumber(order.getOrderNumber())
                 .orderItemList(order.getOrderItemList())
