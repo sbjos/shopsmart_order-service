@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.2.3'
 	id 'io.spring.dependency-management' version '1.1.4'
+	id 'com.google.cloud.tools.jib' version '3.4.1'
 }
 
 group = 'com.shopsmart'
@@ -45,6 +46,17 @@ dependencies {
 	annotationProcessor 'org.projectlombok:lombok'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+jib {
+	from {
+		image = 'eclipse-temurin:17.0.10_7-jre-alpine'
+	}
+
+	to {
+		image = "docker.io/sbjos/microservice/${project.name}:latest"
+		credHelper = 'docker-credential-desktop'
+	}
 }
 
 tasks.named('test') {

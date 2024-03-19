@@ -1,7 +1,5 @@
 package com.shopsmart.orderservice.service;
 
-import brave.Span;
-import brave.Tracer;
 import com.shopsmart.orderservice.dto.InventoryResponse;
 import com.shopsmart.orderservice.dto.OrderItemListDto;
 import com.shopsmart.orderservice.dto.OrderRequest;
@@ -58,13 +56,12 @@ public class OrderService {
 
         // Calling inventory-service to verify if the product is in stock before creating the order.
         log.info("Calling inventory-service");
+        InventoryResponse[] inventoryList = inventoryList(orderSkuStockMap);
 
         Observation inventoryServiceObservation = Observation.createNotStarted("inventory-service-lookup",
                 this.observationRegistry);
-
         inventoryServiceObservation.lowCardinalityKeyValue("call", "inventory-service");
         return inventoryServiceObservation.observe(() -> {
-            InventoryResponse[] inventoryList = inventoryList(orderSkuStockMap);
 
             // Verifying if they are all available.
             boolean isProductInStock = Arrays.stream(inventoryList)
@@ -79,12 +76,13 @@ public class OrderService {
                 orderRepository.save(order);
                 log.info("Order created");
 
+                log.info("Calling notification-service");
                 kafkaTemplate.send("notification-topic", mapToOrderPlacedEvent(order));
-                log.info("Notification sent");
 
                 return CompletableFuture.supplyAsync(() -> mapToOrderResponse(order));
+
             } else {
-                // If not all available, order will not be saved.
+                // If all not available, order will not be saved.
                 log.info("Some items are out of stock.", new OutOfStockException("Out of stock"));
                 return CompletableFuture.supplyAsync(() ->
                         outOfStockItems(List.of(inventoryList), orderSkuStockMap));
@@ -128,7 +126,7 @@ public class OrderService {
             Order order = findOrder(orderNumber);
             log.info("Order {} found", orderNumber);
             orderRepository.delete(order);
-            log.info("Order {} deleted", orderNumber);
+            log.info("Order {} cancelled", orderNumber);
             response = mapToOrderResponse(order);
 
         } catch (OrderNotFoundException e) {

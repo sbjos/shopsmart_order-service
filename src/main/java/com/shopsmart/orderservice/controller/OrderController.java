@@ -18,29 +18,40 @@ public class OrderController {
     private final OrderService orderService;
 
     @PostMapping
-    public ResponseEntity<OrderResponse> placeOrder(@RequestBody OrderRequest orderRequest) {
-        OrderResponse order = orderService.placeOrder(orderRequest).join();
+    public ResponseEntity<?> placeOrder(@RequestBody OrderRequest orderRequest) {
+        OrderResponse response = orderService.placeOrder(orderRequest).join();
 
-        if (order.getOrderItemList() == null)
-            return new ResponseEntity<>(order, HttpStatus.OK);
-        return new ResponseEntity<>(order, HttpStatus.CREATED);
+        if (response.getOrderItemList() == null)
+            return new ResponseEntity<>(response, HttpStatus.CONFLICT);
+        return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
     @GetMapping
-    @ResponseStatus(HttpStatus.OK)
-    public List<OrderResponse> getAllOrder() {
-        return orderService.getAllOrder();
+    public ResponseEntity<?> getAllOrder() {
+        List<OrderResponse> response = orderService.getAllOrder();
+
+        if (response.isEmpty())
+            return new ResponseEntity<>("Order list not found", HttpStatus.NOT_FOUND);
+        return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
     @GetMapping(value = "/{orderNumber}")
-    @ResponseStatus(HttpStatus.OK)
-    public OrderResponse getOrder(@PathVariable String orderNumber) {
-        return orderService.getOrder(orderNumber);
+    public ResponseEntity<?> getOrder(@PathVariable String orderNumber) {
+        OrderResponse response = orderService.getOrder(orderNumber);
+
+        if (response.getId() == null)
+            return new ResponseEntity<>(String.format("Order %s not found", orderNumber),
+                    HttpStatus.NOT_FOUND);
+        return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
     @DeleteMapping(value = "/{orderNumber}")
-    @ResponseStatus(HttpStatus.OK)
-    public OrderResponse cancelOrder(@PathVariable String orderNumber) {
-        return orderService.cancelOrder(orderNumber);
+    public ResponseEntity<?> cancelOrder(@PathVariable String orderNumber) {
+        OrderResponse response = orderService.cancelOrder(orderNumber);
+
+        if (response.getId() == null)
+            return new ResponseEntity<>(String.format("Order %s not found", orderNumber),
+                    HttpStatus.NOT_FOUND);
+        return new ResponseEntity<>(response, HttpStatus.OK);
     }
 }
